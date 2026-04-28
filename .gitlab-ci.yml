@@ -1,0 +1,136 @@
+image: golang:1.26.2-alpine3.22
+
+variables:
+  # fetch вместо clone: shell-runner не удаляет $CI_PROJECT_DIR на каждый job,
+  # иначе .cache/build/ внутри проекта мешает rm -rf и job падает на cleanup.
+  GIT_STRATEGY: fetch
+  GIT_CLEAN_FLAGS: -ffdx -e .cache/
+  GOMODCACHE: $CI_PROJECT_DIR/.cache/mod
+  GOCACHE: $CI_PROJECT_DIR/.cache/build
+  CGO_ENABLED: "0"
+  DOCKER_BUILDKIT: "1"
+  DOCKER_TLS_CERTDIR: ""
+
+stages:
+  - lint
+  - test
+  - image
+
+cache:
+  key: go-v2-$CI_COMMIT_REF_SLUG
+  paths:
+    - .cache/mod/
+    - .cache/build/
+
+default:
+  before_script:
+    - apk add --no-cache git
+    - cd backend
+
+fmt:
+  stage: lint
+  script:
+    - test -z "$(gofmt -l .)" || (echo "gofmt diff:" && gofmt -d . && exit 1)
+
+vet:
+  stage: lint
+  script:
+    - go vet ./...
+
+test:
+  stage: test
+  script:
+    # -count=1 отключает кеш тестов (см. go test -help)
+    # -race требует CGO + gcc; на golang:alpine это apk add build-base — оставим
+    # на потом, чтобы не раздувать CI image. Вернёмся, когда понадобится.
+    - go test -v -count=1 ./...
+
+docker:
+  stage: image
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script: []
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    # тянем предыдущий :latest для cache-from, чтобы переиспользовать слои
+    - docker pull "$CI_REGISTRY_IMAGE:latest" || true
+    - >
+      docker build --pull
+      --cache-from "$CI_REGISTRY_IMAGE:latest"
+      --build-arg BUILDKIT_INLINE_CACHE=1
+      -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+      -t "$CI_REGISTRY_IMAGE:latest" .
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+    - docker push "$CI_REGISTRY_IMAGE:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+grype:
+  stage: image
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script: []
+  needs:
+    - docker
+  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker pull "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+    - mkdir -p .bin reports
+    - curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b .bin v0.88.0
+    # человекочитаемая таблица в job log + .txt артефакт
+    - ./.bin/grype "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" --only-fixed | tee reports/grype.txt
+    # JSON для машинной обработки
+    - ./.bin/grype "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" --only-fixed -o json > reports/grype.json
+    # HTML отчёт через встроенный Go-template движок grype
+    - |
+      cat > reports/grype.tmpl <<'TMPL'
+      <!DOCTYPE html>
+      <html lang="en"><head><meta charset="utf-8"><title>Grype scan</title>
+      <style>
+        body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:24px;color:#222;background:#fafafa}
+        h1{font-size:20px;margin:0 0 4px}
+        .meta{color:#6b7280;font-size:12px;margin-bottom:16px}
+        table{border-collapse:collapse;width:100%;font-size:13px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+        th,td{border-bottom:1px solid #e5e7eb;padding:8px 12px;text-align:left;vertical-align:top}
+        th{background:#f3f4f6;font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.04em;color:#374151}
+        tr:hover td{background:#fafafa}
+        .sev{font-weight:700;text-transform:uppercase;font-size:11px;padding:2px 8px;border-radius:3px;display:inline-block}
+        .sev-Critical{background:#fee2e2;color:#991b1b}
+        .sev-High{background:#fee2e2;color:#b91c1c}
+        .sev-Medium{background:#fef3c7;color:#92400e}
+        .sev-Low{background:#dcfce7;color:#166534}
+        .sev-Negligible{background:#f3f4f6;color:#6b7280}
+        .sev-Unknown{background:#f3f4f6;color:#6b7280}
+        code{font-family:JetBrains Mono,Menlo,Consolas,monospace;font-size:12px}
+      </style></head>
+      <body>
+      <h1>grype: <code>{{ .Source.Target.UserInput }}</code></h1>
+      <div class="meta">{{ len .Matches }} matches with fix available</div>
+      <table>
+        <tr><th>Package</th><th>Version</th><th>Type</th><th>CVE</th><th>Severity</th><th>Fixed in</th></tr>
+        {{- range .Matches }}
+        <tr>
+          <td><code>{{ .Artifact.Name }}</code></td>
+          <td><code>{{ .Artifact.Version }}</code></td>
+          <td>{{ .Artifact.Type }}</td>
+          <td><a href="https://nvd.nist.gov/vuln/detail/{{ .Vulnerability.ID }}">{{ .Vulnerability.ID }}</a></td>
+          <td><span class="sev sev-{{ .Vulnerability.Severity }}">{{ .Vulnerability.Severity }}</span></td>
+          <td><code>{{- range $i, $v := .Vulnerability.Fix.Versions }}{{ if $i }}, {{ end }}{{ $v }}{{ end -}}</code></td>
+        </tr>
+        {{- end }}
+      </table>
+      </body></html>
+      TMPL
+    - ./.bin/grype "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" --only-fixed -o template -t reports/grype.tmpl > reports/grype.html
+  artifacts:
+    when: always
+    paths:
+      - reports/grype.html
+      - reports/grype.txt
+      - reports/grype.json
+    expire_in: 30 days

@@ -1,0 +1,5 @@
+clusters:
+  - name: homelab
+    kubeconfig: /home/support/.kube/k3s-sbel
+  - name: prod
+    kubeconfig: /home/support/.kube/k3s-ubuntu

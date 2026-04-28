@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OBS Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app-layout">
+
+  <nav class="view-nav">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>
+        <span class="brand-title">OBS-Board</span>
+        <span class="brand-sub" id="apiBase">v0.3</span>
+      </div>
+    </div>
+
+    <div class="nav-tabs">
+      <button class="view-tab active" data-view="cluster"><span class="vt-dot"></span>Cluster</button>
+      <div class="cluster-subnav" id="clusterSubNav">
+        <div class="clusters" id="clusterTabs"></div>
+      </div>
+      <button class="view-tab" data-view="runners"><span class="vt-dot"></span>GitLab Runners</button>
+      <button class="view-tab" data-view="servers"><span class="vt-dot"></span>Servers <span class="vt-badge" id="serversBadge" style="display:none">0</span></button>
+      <button class="view-tab" data-view="tools"><span class="vt-dot"></span>Tools</button>
+    </div>
+
+    <div class="nav-foot">
+      <span class="nav-section-label">refresh rate</span>
+      <div class="refresh-group" id="refreshGroup">
+        <button class="refresh-btn" data-val="10">10s</button>
+        <button class="refresh-btn" data-val="30">30s</button>
+        <button class="refresh-btn" data-val="60">60s</button>
+        <button class="refresh-btn" data-val="0">∥</button>
+      </div>
+      <div class="health loading" id="health">
+        <span class="dot"></span>
+        <span id="healthText">CONNECTING…</span>
+      </div>
+      <span class="nav-last-update mono" id="lastUpdate">—</span>
+    </div>
+  </nav>
+
+  <div class="content-area">
+
+    <div class="main" id="mainView">
+
+      <div class="stats-row" id="stats">
+        <div class="stat"><div class="stat-label">loading</div><div class="skel" style="margin-top: 8px;"></div></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head">
+            <span>Nodes</span>
+            <span class="count" id="nodesCount">—</span>
+          </div>
+          <div class="panel-body">
+            <div class="node-row header">
+              <span></span><span>Name</span><span>CPU</span><span>MEM</span><span>PODS</span><span>AGE</span>
+            </div>
+            <div id="nodesList"><div class="empty">loading…</div></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <span>Pod Status</span>
+            <span class="count" id="podsTotal">—</span>
+          </div>
+          <div class="donut-wrap">
+            <svg class="donut" viewBox="0 0 42 42" id="donut"></svg>
+            <div class="donut-legend" id="donutLegend"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head">
+            <span>Cluster CPU / Memory · last 30m</span>
+            <span class="count">1m res</span>
+          </div>
+          <div class="chart-legend">
+            <span><span class="sw" style="background: var(--accent);"></span>CPU</span>
+            <span><span class="sw" style="background: var(--info);"></span>MEM</span>
+          </div>
+          <div class="chart-wrap">
+            <svg class="chart" id="chart" viewBox="0 0 600 160" preserveAspectRatio="none"></svg>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <span>Events</span>
+            <span class="count" id="eventsCount">—</span>
+          </div>
+          <div class="panel-body" id="eventsList" style="max-height: 220px; overflow-y: auto;">
+            <div class="empty">loading…</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head">
+            <span>Workloads</span>
+            <span class="count" id="wlCount">—</span>
+          </div>
+          <div class="panel-body">
+            <div class="workload-row header">
+              <span>Name / Namespace</span><span>Kind</span>
+              <span style="text-align: right;">Repl</span>
+              <span style="text-align: right;">Ready</span>
+              <span style="text-align: right;">Age</span>
+            </div>
+            <div id="workloadsList" style="max-height: 400px; overflow-y: auto;">
+              <div class="empty">loading…</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <span>Namespaces</span>
+            <span class="count" id="nsCount">—</span>
+          </div>
+          <div class="ns-grid" id="nsGrid"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="main" id="runnersView" style="display:none">
+      <div class="panel collapsible" id="runnersPanel">
+        <div class="panel-head">
+          <span>GitLab Runners</span>
+          <span class="count" id="runnersCount">—</span>
+          <span class="collapse-arrow">▾</span>
+        </div>
+        <div class="panel-body collapsible-body">
+          <div id="runnerSummary"></div>
+          <div class="runner-row header">
+            <span></span>
+            <span>Name</span>
+            <span>Tags</span>
+            <span>Type</span>
+            <span>Last seen</span>
+            <span>ID</span>
+          </div>
+          <div id="runnersList"><div class="empty">loading…</div></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:1rem">
+        <div class="panel-head">
+          <span>GitLab Pipelines</span>
+          <span class="count" id="pipelinesCount">—</span>
+        </div>
+        <div id="plFilterBar" class="pl-filter-bar"></div>
+        <div id="pipelinesList"><div class="empty">loading…</div></div>
+      </div>
+    </div>
+
+    <div class="main" id="serversView" style="display:none">
+      <div class="panel">
+        <div class="panel-head">
+          <span>Servers</span>
+          <span class="count" id="serversCount">—</span>
+        </div>
+        <div id="serversList"><div class="empty">loading…</div></div>
+      </div>
+    </div>
+
+    <div class="main" id="serverDetailView" style="display:none">
+      <div id="serverDetailBody"><div class="empty">loading…</div></div>
+    </div>
+
+    <div class="main" id="toolsView" style="display:none">
+      <div class="tools-grid" id="toolsGrid"><div class="empty">loading…</div></div>
+      <div class="panel about-panel" id="aboutPanel" style="margin-top:20px">
+        <div class="panel-head"><span>About</span><span class="count" id="aboutUptime">—</span></div>
+        <div id="aboutBody"><div class="empty">loading…</div></div>
+      </div>
+    </div>
+
+    <div class="footer">obs board · <span id="apiUrl"></span></div>
+
+  </div><!-- .content-area -->
+</div><!-- .app-layout -->
+
+<script src="app.js" defer></script>
+</body>
+</html>
