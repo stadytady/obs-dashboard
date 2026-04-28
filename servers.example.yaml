@@ -1,0 +1,3 @@
+servers:
+  - name: main-lbd
+    url: http://192.168.10.146:9100

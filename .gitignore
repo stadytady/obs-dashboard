@@ -1,0 +1,21 @@
+# build artifacts
+/kube-ctl
+/kube-ctl.exe
+/backend/kube-ctl
+/backend/kube-ctl.exe
+
+# local run logs
+/kube-ctl.out.log
+/kube-ctl.err.log
+
+# editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/
+
+# legacy static dir — source of truth is frontend/
+backend/static/
